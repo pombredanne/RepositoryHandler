@@ -22,16 +22,16 @@ from repositoryhandler.Command import CommandError, CommandRunningError
 DEBUG = False
 
 __all__ = [
-        'Repository',
-        'RepositoryUnknownError',
-        'RepositoryInvalidWorkingCopy',
-        'RepositoryInvalidBranch',
-        'InvalidWatch',
-        'RepositoryCommandError',
-        'RepositoryCommandRunningError',
-        'create_repository',
-        'register_backend',
-        'create_repository_from_path'
+    'Repository',
+    'RepositoryUnknownError',
+    'RepositoryInvalidWorkingCopy',
+    'RepositoryInvalidBranch',
+    'InvalidWatch',
+    'RepositoryCommandError',
+    'RepositoryCommandRunningError',
+    'create_repository',
+    'register_backend',
+    'create_repository_from_path'
 ]
 
 
@@ -78,7 +78,8 @@ class Repository:
         return self.type
 
     def copy(self):
-        '''Create a copy of the repository object. Watchers should not be copied'''
+        ''' Create a copy of the repository object.
+            Watchers should not be copied'''
         raise NotImplementedError
 
     def checkout(self, uri, rootdir, newdir=None, branch=None, rev=None):
@@ -91,6 +92,10 @@ class Repository:
 
     def cat(self, uri, rev=None):
         '''Output the content of specified uri'''
+        raise NotImplementedError
+
+    def size(self, uri, rev=None):
+        '''Output the content size of specified uri'''
         raise NotImplementedError
 
     def log(self, uri, rev=None, files=None):
@@ -124,6 +129,10 @@ class Repository:
     def get_last_revision(self, uri):
         '''Return the last revision'''
         raise NotImplementedError
+
+    def is_ancestor(self, uri, rev1, rev2):
+        '''Decide if rev1 is an ancestor of rev2'''
+        raise  NotImplementedError
 
     def add_watch(self, type, callback, user_data=None):
         if type not in range(N_WATCHES):

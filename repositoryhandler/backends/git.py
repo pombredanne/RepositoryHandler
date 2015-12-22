@@ -21,7 +21,7 @@ import re
 
 from repositoryhandler.Command import Command, CommandError
 from repositoryhandler.backends import Repository,\
-     RepositoryInvalidWorkingCopy, register_backend
+    RepositoryInvalidWorkingCopy, register_backend, RepositoryCommandError
 from repositoryhandler.backends.watchers import *
 
 
@@ -102,9 +102,14 @@ class GitRepository(Repository):
 
         command = Command(cmd)
         out = command.run_sync()
+        # it could looks like:
+        #  git version 1.7.10.4 // 1.8.4.rc3 // 1.7.12.4 (Apple Git-37) // 1.9.3 (Apple Git-50)
 
         version = out.replace("git version ", "")
-        self.git_version = tuple([int(i) for i in version.split('.')])
+        try:
+            self.git_version = tuple([int(i) for i in version.split('.')])
+        except ValueError:
+            self.git_version = tuple([int(i) for i in version.split()[0].split('.')[0:3]])
 
         return self.git_version
 
@@ -200,7 +205,11 @@ class GitRepository(Repository):
         else:
             cmd.append(module)
 
-        command = Command(cmd, rootdir)
+        def ignore_progress_stderr(*args):
+            return True
+
+        command = Command(cmd, rootdir,
+                          error_handler_func=ignore_progress_stderr)
         self._run_command(command, CHECKOUT)
 
         if branch is not None:
@@ -241,7 +250,25 @@ class GitRepository(Repository):
         command = Command(cmd, cwd, env={'PAGER': ''})
         self._run_command(command, CAT)
 
-    def log(self, uri, rev=None, files=None):
+    def size(self, uri, rev=None):
+        self._check_uri(uri)
+
+        cmd = ['git', 'cat-file', '-s']
+
+        cwd = self.__get_root_dir(uri)
+        target = uri[len(cwd):].strip("/")
+
+        if rev is not None:
+            target = "%s:%s" % (rev, target)
+        else:
+            target = "HEAD:%s" % (target)
+
+        cmd.append(target)
+
+        command = Command(cmd, cwd, env={'PAGER': ''})
+        self._run_command(command, SIZE)
+
+    def log(self, uri, rev=None, files=None, gitref=None):
         self._check_uri(uri)
 
         if os.path.isfile(uri):
@@ -252,8 +279,8 @@ class GitRepository(Repository):
         else:
             cwd = os.getcwd()
 
-        cmd = ['git', 'log', '--all', '--topo-order', '--pretty=fuller',
-               '--parents', '--name-status', '-M', '-C']
+        cmd = ['git', 'log', '--topo-order', '--pretty=fuller',
+               '--parents', '--name-status', '-M', '-C', '-c']
 
         # Git < 1.6.4 -> --decorate
         # Git = 1.6.4 -> broken
@@ -270,23 +297,36 @@ class GitRepository(Repository):
         else:
             cmd.append('--decorate=full')
 
-        try:
-            get_config(uri, 'remote.origin.url')
-            cmd.append('origin')
-        except CommandError:
-            pass
+
+        if gitref:
+            cmd.append(gitref)
+        else:
+            try:
+                get_config(uri, 'remote.origin.url')
+
+                if major <= 1 and minor < 8:
+                    cmd.append('origin')
+                else:
+                    cmd.append('--remotes=origin')
+            except CommandError:
+                pass
+            cmd.append('--all')
 
         if rev is not None:
             cmd.append(rev)
 
-        if files is not None:
+        if files:
+            cmd.append('--')
             for file in files:
                 cmd.append(file)
         elif cwd != uri:
             cmd.append(uri)
 
         command = Command(cmd, cwd, env={'PAGER': ''})
-        self._run_command(command, LOG)
+        try:
+            self._run_command(command, LOG)
+        except RepositoryCommandError:
+            pass
 
     def rlog(self, module=None, rev=None, files=None):
         # Not supported by Git
@@ -425,5 +465,29 @@ class GitRepository(Repository):
             return None
 
         return out.strip('\n\t ')
+
+    def is_ancestor(self, uri, rev1, rev2):
+        self._check_uri(uri)
+        version = self._get_git_version()
+
+        if version[0] == 0 or (version[0] == 1 and version[1] < 8):
+            # Should we implement an workaround for git under 1.8 or
+            # just have git 1.8 or later in prerequisites?
+            # An workaround can be found at
+            # http://stackoverflow.com/a/3006203/1305362
+            raise NotImplementedError
+
+        # 'git merge-base --is-ancestor' is only supported after 1.8
+        cmd = ['git', 'merge-base', '--is-ancestor', rev1, rev2]
+        command = Command(cmd, uri, env={'PAGER': ''})
+        try:
+            command.run()
+            return True
+        except CommandError as e:
+            if e.returncode == 1:
+                return False
+            else:
+                raise e
+
 
 register_backend('git', GitRepository)
